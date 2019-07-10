@@ -1,0 +1,687 @@
+学籍番号: 201611448
+名前: 髙倉礼
+課題番号：2
+題名：マルチスレッド・プログラミング
+
+・問題201
+1.相互排除プログラムにおけるスレッド数の増加を検証
+***ソースコード***
+#include <stdio.h>
+#include <pthread.h>
+
+void thread_A(), thread_B(), thread_C();
+int     shared_resource ;
+pthread_mutex_t mutex1 ;
+
+int main() {
+    pthread_t t1 ;
+    pthread_t t2 ;
+    pthread_t t3 ;
+        shared_resource = 0 ;
+        pthread_mutex_init( &mutex1, NULL );
+        pthread_setconcurrency( 3 );
+        pthread_create( &t1, NULL, (void *)thread_A, 0 );
+        pthread_create( &t2, NULL, (void *)thread_B, 0 );
+        pthread_create( &t3, NULL, (void *)thread_C, 0 );
+        pthread_join( t1, NULL );
+        pthread_join( t2, NULL );
+        pthread_join( t3, NULL );
+        printf("main(): shared_resource == %d\n", shared_resource );
+        return( 0 );
+}
+
+void thread_A()
+{
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ )
+        {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+void thread_B() {
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ ) {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+void thread_C() {
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ ) {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+***実行結果***
+$ make 201_1
+$ ./201_1
+main(): shared_resource == 3000000
+$
+
+***プログラムの説明***
+1,000,000回のインクリメントを行う処理を各スレッドが行う．
+メインスレッドを除き生成されたスレッドは3つあるため，正しく相互排除ができていれば，
+最終的に出力される値は3,000,000回インクリメントされた結果として，3,000,000と出力されることが想定できる．
+
+今回，追記して作成したプログラムにおいて，実行結果が3,000,000であることから，
+よりスレッドが多くなったとしても相互排除が正しくできていることがわかる．
+
+
+
+2.条件変数プログラムにおけるスレッド数の増加を検証
+***ソースコード***
+#include <stdio.h>	/* printf() */
+#include <stdlib.h>	/* malloc(), exit() */
+#include <pthread.h>
+
+#define	BUFFER_SIZE	4
+struct circular_buffer
+{
+	int rp ;
+	int wp ;
+	int used ;
+	int data[BUFFER_SIZE];
+	pthread_mutex_t	mutex ;
+	pthread_cond_t	not_full ;
+	pthread_cond_t	not_empty ;
+};
+
+void thread_A(struct circular_buffer *b);
+void thread_B(struct circular_buffer *b);
+void thread_C(struct circular_buffer *b);
+
+void put( struct circular_buffer *b,int x )
+{
+	pthread_mutex_lock( &b->mutex );
+loop:	if( b->used == BUFFER_SIZE )
+	{
+		pthread_cond_wait( &b->not_full,&b->mutex );
+		goto loop;
+	}
+	b->data[ b->wp++ ] = x ;
+	if( b->wp >= BUFFER_SIZE )
+		b->wp = 0 ;
+	b->used ++ ;
+	pthread_cond_broadcast( &b->not_empty );
+	pthread_mutex_unlock( &b->mutex );
+}
+
+int get( struct circular_buffer *b )
+{
+    int x ;
+	pthread_mutex_lock( &b->mutex );
+loop:	if( b->used == 0 )
+	{
+		pthread_cond_wait( &b->not_empty,&b->mutex );
+		goto loop;
+	}
+	x = b->data[ b->rp++ ] ;
+	if( b->rp >= BUFFER_SIZE )
+		b->rp = 0 ;
+	b->used -- ;
+	pthread_cond_broadcast( &b->not_full );
+	pthread_mutex_unlock( &b->mutex );
+	return( x );
+}
+
+int main()
+{
+	pthread_t t1 ;
+	pthread_t t2 ;
+	pthread_t t3 ;
+	struct circular_buffer *b  ;
+	b = (struct circular_buffer *)malloc(sizeof(struct circular_buffer));
+		if( b == NULL )
+	{
+		perror("no memory for struct buffer\n");
+		exit( -1 );
+	}
+	b->rp = 0 ;
+	b->wp = 0 ;
+	b->used = 0 ;
+	pthread_mutex_init( &b->mutex, NULL );
+	pthread_cond_init( &b->not_full,NULL );
+	pthread_cond_init( &b->not_empty,NULL );
+	pthread_setconcurrency( 2 );
+	pthread_create( &t1, NULL, (void *)thread_A, (void *)b );
+	pthread_create( &t2, NULL, (void *)thread_B, (void *)b );
+	pthread_create( &t3, NULL, (void *)thread_C, (void *)b );
+	pthread_join( t1, NULL );
+	pthread_join( t2, NULL );
+	pthread_join( t3, NULL );
+	return( 0 );
+}
+
+void thread_A( struct circular_buffer *b )	/* producer */
+{
+	int i,x ;
+	for( i = 0 ; i<20 ; i++ )
+	{
+		x = i ;
+		printf("thread_A(): put( %d )\n",x );
+		put( b,x );
+	}
+}
+
+void thread_B( struct circular_buffer *b )	/* consumer */
+{
+	int i, x ;
+	for( i = 0 ; i<10 ; i++ )
+	{
+		x = get( b );
+		printf("thread_B(): get() %d.\n", x );
+	}
+}
+
+void thread_C( struct circular_buffer *b )	/* consumer */
+{
+	int i, x ;
+	for( i = 0 ; i<10 ; i++ )
+	{
+		x = get( b );
+		printf("thread_C(): get() %d.\n", x );
+	}
+}
+
+***実行結果***
+$ make 201_2
+$ ./201_2
+thread_A(): put( 0 )
+thread_A(): put( 1 )
+thread_A(): put( 2 )
+thread_C(): get() 1.
+thread_A(): put( 3 )
+thread_A(): put( 4 )
+thread_A(): put( 5 )
+thread_A(): put( 6 )
+thread_B(): get() 0.
+thread_B(): get() 2.
+thread_B(): get() 3.
+thread_C(): get() 4.
+thread_C(): get() 6.
+thread_A(): put( 7 )
+thread_A(): put( 8 )
+thread_A(): put( 9 )
+thread_A(): put( 10 )
+thread_A(): put( 11 )
+thread_A(): put( 12 )
+thread_B(): get() 5.
+thread_C(): get() 7.
+thread_A(): put( 13 )
+thread_B(): get() 8.
+thread_B(): get() 9.
+thread_C(): get() 11.
+thread_C(): get() 12.
+thread_A(): put( 14 )
+thread_A(): put( 15 )
+thread_A(): put( 16 )
+thread_A(): put( 17 )
+thread_B(): get() 10.
+thread_B(): get() 14.
+thread_B(): get() 15.
+thread_C(): get() 13.
+thread_C(): get() 17.
+thread_B(): get() 16.
+thread_A(): put( 18 )
+thread_A(): put( 19 )
+thread_C(): get() 18.
+thread_C(): get() 19.
+$
+
+***プログラムの説明***
+条件変数を用いたプログラムでは，全てのスレッドがアクセスできる共有のバッファを用意し，
+そのバッファのサイズを超えないように数値が格納され，バッファに値が格納されている時のみ値を取り出す．
+バッファに空きがある時，またはバッファが空ではない時にそれぞれの状態に応じた通知がpthread_cond_broadcast()により行われる．
+この通知を各スレッドは受け取り，処理が実行可能であるかを判断する．
+
+今回作成したコードにおいて，producerスレッドの生成量と，新しく追加したconsumerスレッドの消費量の辻褄を合わせるために，threadAのループ回数を20とした．
+実行結果から，A, B, Cが順番に実行されているわけではなく，それぞれが独立して実行され，最終的に生産量と消費量の均衡が取れていることがわかる．
+
+
+・問題202
+***ソースコード***
+#include <stdio.h>
+#include <pthread.h>
+
+void thread_A(), thread_B(), thread_C();
+void create_threads();
+int     shared_resource ;
+pthread_mutex_t mutex1 ;
+
+int main() {
+    pthread_t t1 ;
+        shared_resource = 0 ;
+        pthread_mutex_init( &mutex1, NULL );
+        pthread_setconcurrency( 3 );
+        pthread_create( &t1, NULL, (void *)thread_A, 0 );
+        create_threads();
+        pthread_join( t1, NULL );
+        printf("main(): shared_resource == %d\n", shared_resource );
+        return( 0 );
+}
+
+void thread_A()
+{
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ )
+        {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+void thread_B() {
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ ) {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+void thread_C() {
+    int i, x ;
+        for( i = 0 ; i<1000000 ; i++ ) {
+            pthread_mutex_lock( &mutex1 );
+            x = shared_resource ;
+            x = x + 1 ;
+            shared_resource = x ;
+            pthread_mutex_unlock( &mutex1 );
+        }
+}
+
+void create_threads() {
+    pthread_t t2 ;
+    pthread_t t3 ;
+    pthread_create( &t2, NULL, (void *)thread_B, 0 );
+    pthread_create( &t3, NULL, (void *)thread_C, 0 );
+    pthread_join( t2, NULL );
+    pthread_join( t3, NULL );
+}
+
+***実行結果***
+$ make 202
+$ ./202
+main(): shared_resource == 3000000
+$
+
+***プログラムの説明***
+201_1におけるソースコードを改変した．
+このプログラムにおいて，create_threads()内において新しく2つのスレッドを生成している．
+実行結果が3,000,000であることから，スレッドが合計で3つ生成されていることがわかり．
+すなわち，1つの手続きであるcreate_threads()から複数のスレッドが生成され，正しく相互排除されていることがわかる．
+
+・問題203
+***ソースコード***
+#include <stdio.h>	/* printf() */
+#include <stdlib.h>	/* malloc(), exit() */
+#include <pthread.h>
+
+#define	BUFFER_SIZE	4
+struct circular_buffer
+{
+	int rp ;
+	int wp ;
+	int used ;
+	int data[BUFFER_SIZE];
+	int buffer_state;
+	pthread_mutex_t	mutex ;
+	pthread_cond_t	not_full ;
+	pthread_cond_t	not_empty ;
+};
+
+void thread_A(struct circular_buffer **b);
+void thread_B(struct circular_buffer **b);
+
+void swapping_buffer( struct circular_buffer **b) {
+	struct circular_buffer *tmp;
+	tmp = (struct circular_buffer *)malloc(sizeof(struct circular_buffer));
+	pthread_mutex_lock( &b[0]->mutex );
+	pthread_mutex_lock( &b[1]->mutex );
+	tmp = b[0];
+	b[0] = b[1];
+	b[1] = tmp;
+	pthread_mutex_unlock( &b[0]->mutex );
+	pthread_mutex_unlock( &b[1]->mutex );
+	free(tmp);
+}
+
+
+void put( struct circular_buffer **buffer, int x )
+{
+	struct circular_buffer *b = buffer[0];
+	
+loop:	if( b->used == BUFFER_SIZE )
+	{
+		pthread_cond_wait( &b->not_full, &b->mutex );
+		goto loop;
+	}
+	b->data[ b->wp++ ] = x ;
+	b->used++ ;
+
+	if( b->wp >= BUFFER_SIZE ){
+		b->wp = 0 ;
+	}
+
+	if( b->wp >= BUFFER_SIZE ){
+		b->wp = 0 ;
+	}
+
+	if( b->wp == BUFFER_SIZE ){
+		swapping_buffer(buffer);
+	}
+	pthread_cond_broadcast( &b->not_empty );
+}
+
+
+
+int get( struct circular_buffer **buffer )
+{
+    int x ;
+	struct circular_buffer *b = buffer[0];
+
+loop:	if( b->used == 0 )
+	{
+		pthread_cond_wait( &b->not_empty,&b->mutex );
+		goto loop;
+	}
+	x = b->data[ b->rp++ ] ;
+	b->used-- ;
+
+	if( b->rp >= BUFFER_SIZE ){
+		b->rp = 0 ;
+	}
+
+	if( b->rp == BUFFER_SIZE ){
+		swapping_buffer(buffer);
+	}
+	pthread_cond_broadcast( &b->not_full );
+
+	return( x );
+}
+
+
+
+int main()
+{
+	pthread_t t1 ;
+	pthread_t t2 ;
+	struct circular_buffer *b[2]  ;
+	
+	// それぞれのバッファの初期化を行う．
+	int i;
+	for(i=0; i<2; i++){
+		b[i] = (struct circular_buffer *)malloc(sizeof(struct circular_buffer));
+			if( b[i] == NULL )
+		{
+			perror("no memory for struct buffer\n");
+			exit( -1 );
+		}
+		b[i]->rp = 0 ;
+		b[i]->wp = 0 ;
+		b[i]->used = 0;
+		b[i]->buffer_state = i;
+		pthread_mutex_init( &b[i]->mutex, NULL );
+		pthread_cond_init( &b[i]->not_full,NULL );
+		pthread_cond_init( &b[i]->not_empty,NULL );
+	}
+	
+	// それぞれのスレッドをforkする．
+	pthread_setconcurrency( 2 );
+	pthread_create( &t1, NULL, (void *)thread_A, (void *)b );
+	pthread_create( &t2, NULL, (void *)thread_B, (void *)b );
+	pthread_join( t1, NULL );
+	pthread_join( t2, NULL );
+	return( 0 );
+}
+
+void thread_A( struct circular_buffer **b )	/* producer */
+{
+	int i, x ;
+	for( i = 0 ; i<10 ; i++ )
+	{
+		x = i ;
+		printf("thread_A(): put( %d )\n",x );
+		put( b, x );
+	}
+}
+
+void thread_B( struct circular_buffer **b )	/* consumer */
+{
+	int i, x ;
+	for( i = 0 ; i<10 ; i++ )
+	{
+		x = get( b );
+		printf("thread_B(): get() %d.\n", x );
+	}
+}
+
+***実行結果***
+$ make 203
+$./203
+thread_A(): put( 0 )
+thread_A(): put( 1 )
+thread_A(): put( 2 )
+thread_A(): put( 3 )
+thread_A(): put( 4 )
+thread_A(): put( 5 )
+thread_B(): get() 0.
+thread_B(): get() 1.
+thread_A(): put( 6 )
+thread_A(): put( 7 )
+thread_B(): get() 2.
+thread_B(): get() 3.
+thread_B(): get() 4.
+thread_B(): get() 5.
+thread_A(): put( 8 )
+thread_A(): put( 9 )
+thread_B(): get() 6.
+thread_B(): get() 7.
+thread_B(): get() 8.
+thread_B(): get() 9.
+$
+
+***プログラムの説明***
+バッファを2つ用意し，それぞれのスレッドはそれぞれのバッファに対して処理を行い．
+バッファに書き込まれた場合，読込バッファが空ならバッファ同士のスワップを行う．
+
+・問題204
+***ソースコード***
+/*  * condv-buffer.c -- 条件変数を使った環状バッファ  */  
+#include <stdio.h>      /* printf() */
+#include <stdlib.h>     /* malloc(), exit() */
+#include <pthread.h> 
+#define BUFFER_SIZE     4               /* バッファの大きさ */
+struct circular_buffer
+{
+    int rp ;                        /* 読み出す位置 */
+    int wp ;                        /* 書き込む位置 */
+    int used ;                      /* バッファ内の要素数 */
+    int data[BUFFER_SIZE];          /* データを保存する場所 */
+    pthread_mutex_t mutex ;         /* この構造体の相互排除のための mutex */
+    pthread_cond_t is_access ;  /* バッファが空ではない状態を待つための条件変数 */
+};
+
+void thread_A(struct circular_buffer *b);
+void thread_B(struct circular_buffer *b);
+
+void put( struct circular_buffer *b, int x ) {
+    pthread_mutex_lock( &b->mutex );
+loop:   if( b->used == BUFFER_SIZE )
+    {
+        pthread_cond_wait( &b->is_access, &b->mutex );
+        goto loop;
+    }
+    b->data[ b->wp++ ] = x ;
+    if( b->wp >= BUFFER_SIZE )
+        b->wp = 0 ;
+    b->used++ ;
+    pthread_cond_broadcast( &b->is_access );
+    pthread_mutex_unlock( &b->mutex );
+}
+
+int get( struct circular_buffer *b ) {
+    int x ;
+    pthread_mutex_lock( &b->mutex );
+loop:   if( b->used == 0 )
+    {
+        pthread_cond_wait( &b->is_access, &b->mutex );
+        goto loop;
+    }
+    x = b->data[ b->rp++ ] ;
+    if( b->rp >= BUFFER_SIZE )
+        b->rp = 0 ;
+    b->used-- ;
+    pthread_cond_broadcast( &b->is_access);
+    pthread_mutex_unlock( &b->mutex );
+    return( x );
+}
+
+int main() {
+    pthread_t t1 ;
+    pthread_t t2 ;
+    struct circular_buffer *b  ;
+
+    b = (struct circular_buffer *)malloc(sizeof(struct circular_buffer));
+    if( b == NULL )
+    {
+        perror("no memory for struct buffer\n");
+        exit( -1 );
+    }
+    b->rp = 0 ;
+    b->wp = 0 ;
+    b->used = 0 ;
+    pthread_mutex_init( &b->mutex, NULL );
+    pthread_cond_init( &b->is_access,NULL );
+    pthread_setconcurrency( 2 );
+    pthread_create( &t1, NULL, (void *)thread_A, (void *)b );
+    pthread_create( &t2, NULL, (void *)thread_B, (void *)b );
+    pthread_join( t1, NULL );
+    pthread_join( t2, NULL );
+    return( 0 );
+}
+
+
+void thread_A( struct circular_buffer *b ) {  /* producer */
+    int i,x ;
+    for( i = 0 ; i<10 ; i++ )
+    {
+        x = i ;
+        printf("thread_A(): put( %d )\n",x );
+        put( b,x );
+    }
+}
+
+void thread_B( struct circular_buffer *b ) {  /* consumer */
+    int i, x ;
+    for( i = 0 ; i<10 ; i++ )
+    {
+        x = get( b );
+        printf("thread_B(): get() %d.\n", x );
+    }
+}
+
+***実行結果***
+$ make 204
+$ ./204
+thread_A(): put( 0 )
+thread_A(): put( 1 )
+thread_A(): put( 2 )
+thread_A(): put( 3 )
+thread_A(): put( 4 )
+thread_B(): get() 0.
+thread_B(): get() 1.
+thread_B(): get() 2.
+thread_B(): get() 3.
+thread_B(): get() 4.
+thread_A(): put( 5 )
+thread_B(): get() 5.
+thread_A(): put( 6 )
+thread_B(): get() 6.
+thread_A(): put( 7 )
+thread_B(): get() 7.
+thread_A(): put( 8 )
+thread_B(): get() 8.
+thread_A(): put( 9 )
+thread_B(): get() 9.
+$
+
+***プログラムの説明***
+条件変数をis_access1つのみにした．
+条件変数が1つのみでも正しく動作することを確認した．
+
+・問題205
+***ソースコード***
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# condv-buffer-python.py -- Circular Buffer in Python
+
+import threading
+
+class recursive_mutex_thread():
+    def __init__(self):
+        self.shared_resource = 1000000
+        self.mutex = threading.RLock()
+
+    def deposit(self, n: int):
+        with self.mutex:
+            self.shared_resource += n
+
+    def add_interest(self):
+        with self.mutex:
+            i = self.shared_resource * 0.05
+            self.deposit( i )
+
+    def thread_A(self):
+        print("thread_A(): deposit( 10000 ) ... ")
+        self.deposit( 10000 )
+        print("thread_A(): deposit( 10000 ) done.")
+
+    def thread_B(self):
+        print("thread_B(): add_interest() ...")
+        self.add_interest()
+        print("thread_B(): add_interest() done.")
+
+def main():
+    b = recursive_mutex_thread()
+    t1 = threading.Thread(target=b.thread_A)
+    t1.start()
+    t2 = threading.Thread(target=b.thread_B)
+    t2.start()
+    t1.join()
+    t2.join()
+    print(f"main(): shared_resource == {b.shared_resource}")
+
+main()
+
+***実行結果***
+$ python3 205.py
+thread_A(): deposit( 10000 ) ... 
+thread_B(): add_interest() ... 
+thread_B(): add_interest() done. 
+thread_A(): deposit( 10000 ) done. 
+main(): shared_resource == 1060500.0
+$
+
+***プログラムの説明***
+Pythonを用いて，再帰的mutexを実装した．
+Pythonにおいて通常のLockを用いて再帰的mutexを実行した場合，デッドロックとなってしまい処理が途中で終了してしまう．
+そこで，RLockを代わりに用いることにより，デッドロックを防ぎ，再帰的mutexがデッドロックとならず処理されるようにした．
