@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# condv-buffer-python.py -- Circular Buffer in Python
 
 import threading
 
