@@ -1,0 +1,48 @@
+学籍番号: 201813550
+名前: 斎藤明子
+課題番号: 3
+題名: マルチスレッド・プログラミング(2)レポート
+
+問題301:  ad hock synchronization
+ad hock synchronizationを用いた間違ったプログラムを以下に記述する。
+
+---プログラム---
+thread_A()
+{
+	while (1)
+	{
+		if(b->used == BUFFER_SIZE) break;
+	}
+}
+
+thread_B()
+{
+        b->used -- ;
+}
+
+
+
+問題302: デッドロック
+デッドロックが起きないような口座間の送金手続きtransfer()を実装したBankAccountクラスのプログラムを以下に記述する。
+
+---プログラム---
+class BankAccount {
+    long value;
+
+    synchronized void deposit(long n) { value += n; }
+    synchronized void withdraw(long n) { value -= n; }
+
+    /**/ void transfer(BankAccount other,long n) {
+        if ( other == this )
+            return;
+        else if ( System.identityHashCode(this) < System.identityHashCode(other))
+            this.doTransfer(other)
+        else
+             other.doTransfer(this)
+    }
+    synchronized void doTransfer(BankAccount other,long n) {
+        /**/
+        withdraw( n );
+        other->deposit( n );
+    }
+}
